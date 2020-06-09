@@ -5,41 +5,68 @@ import random
 import discord
 import logging
 import requests
+import keep_alive
 from bs4 import BeautifulSoup
 from privatekeylmao import token
 from discord.ext import commands, tasks
 
 # ==================================================== Bot setup ====================================================
 started = False
-client = commands.Bot(command_prefix="&")
+client = commands.Bot(command_prefix="%")
 
 @client.event
 async def on_ready():
-    await client.change_presence(activity = discord.Game(name = '&help for a list of commands'))
+    await client.change_presence(activity = discord.Game(name = '%help for a list of commands'))
     global started
     if not started:
         started = True
         checkLoss.start()
 
 # ==================================================== Functions ====================================================
-def grabGames(user, count):
-    # Gets all game placements
-    allgames = []
-    i = 0
-    while len(allgames) < count:
-        url = "https://tracker.gg/tft/profile/riot/NA/" + user + "/matches?page=" + str(i)
-        request = requests.get(url)
-        if request.status_code == 200:
-            contents = request.text
-            soup = BeautifulSoup(contents, "lxml")
-            newLis = [int(e.contents[0].contents[0][0]) for e in soup.find_all("div", class_ = "result")]
-            if not newLis:
-                break
+bullyList = {
+    "Ziadom" : [[0], False],
+    "TheSurge100" : [[0], False],
+    "superpatel101" : [[0], False],
+    "mikubestgirlll" : [[0], False],
+    "KFC_main" : [[0], False]
+}
 
-            allgames += newLis
-            i += 1
-        else:
-            break
+def grabGames(user, count, retry = False):
+    # Gets all game placements
+    allgames = None
+    if retry or user not in bullyList:
+        uniqueTimes = set()
+        allgames = []
+        i = 0
+        c = 0
+
+        while len(allgames) < count and c < 3:
+          url = "https://tracker.gg/tft/profile/riot/NA/" + user.replace("_", "%20") + "/matches?page=" + str(i)
+          request = requests.get(url)
+          if request.status_code == 200:
+              contents = request.text
+              soup = BeautifulSoup(contents, "lxml")
+              origList = soup.find_all("div", class_ = "result")
+              newLis = []
+              for e in origList:
+                if not e.contents[2].get("title") in uniqueTimes:
+                  uniqueTimes.add(e.contents[2].get("title"))
+                  newLis.append(int(e.contents[0].contents[0][0]))
+
+              if not origList:
+                break
+              allgames += newLis
+              i += 1
+          else:
+              print("Bad request, trying again")
+              c+=1
+                
+        if len(allgames) == 0:
+          allgames = [0]
+          print("Found no games for", user)
+
+    else:
+        allgames = bullyList[user][0]
 
     return allgames[:count]
 
@@ -91,7 +118,6 @@ class Commands(commands.Cog):
         await ctx.channel.send(user + " has won " +  str(grabGames(user, x).count(1)) + " of the last " + str(x) + " games.")
     
     
-
     @commands.command(help = "[recent / legacy / wins / win_rate] for leaderboards")
     async def leaderboard(self, ctx, arg):
         scoring = []
@@ -117,24 +143,33 @@ class Commands(commands.Cog):
         await ctx.channel.send(text + "```")   
 
 #-------Background Tasks-------
-bullyList = {
-    "Ziadom" : False,
-    "TheSurge100" : False,
-    "superpatel101" : False,
-    "mikubestgirlll" : False
-}
-
-@tasks.loop(minutes = 5)
+@tasks.loop(minutes = 6)
 async def checkLoss():
     for player in bullyList:
-        lastGame = grabGames(player, 1)
-        if sum(lastGame) == 8: #They lost
-            if not bullyList[player]:
+        if bullyList[player][0][:5] != grabGames(player, 5, True): #Update list
+            newValues = [[], False]
+            for a in range(3):
+              print("Rechecking", player)
+              newValues[0] = grabGames(player, 300, True)
+              if len(newValues[0]) > len(bullyList[player][0]) :
+                done = True
+                break
+                
+            if not done:
+              print("Asking for help", player, newValues)
+              await client.get_channel(712110259719635024).send("Things are going wrong, ping noor for me")
+              break
+
+            bullyList[player] = newValues
+
+        if bullyList[player][0][0] == 8: #They lost
+            if not bullyList[player][1]:
                 await client.get_channel(712110259719635024).send(player+ " recently got LAST!! HAHA what a LOSER! https://tenor.com/view/thanos-fortnite-takethel-dance-gif-12100688")
             
-            bullyList[player] = True
-        else:
-            bullyList[player] = False
+            bullyList[player][1] = True
+    
+    print("Done")
 
+keep_alive.keep_alive()
 client.add_cog(Commands(client))
 client.run(token)
