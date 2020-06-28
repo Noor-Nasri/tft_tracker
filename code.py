@@ -57,8 +57,9 @@ def grabGames(user, count, retry = False):
                 break
               allgames += newLis
               i += 1
+              c = 0
           else:
-              print("Bad request, trying again")
+              print("Bad request, trying again", url,request.status_code)
               c+=1
                 
         if len(allgames) == 0:
@@ -145,9 +146,17 @@ class Commands(commands.Cog):
 #-------Background Tasks-------
 @tasks.loop(minutes = 6)
 async def checkLoss():
+    print("6 minute update, ON")
     for player in bullyList:
-        if bullyList[player][0][:5] != grabGames(player, 5, True): #Update list
+        newFive = grabGames(player, 5, True)
+        while newFive == [0]: #Get newest 5 matches
+          print("Not finding matches for", player)
+          time.sleep(0.05)
+          newFive = grabGames(player, 5, True)
+
+        if bullyList[player][0][:5] != newFive: #Update list
             newValues = [[], False]
+            done = False
             for a in range(3):
               print("Rechecking", player)
               newValues[0] = grabGames(player, 300, True)
